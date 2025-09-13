@@ -1,0 +1,142 @@
+Algorithm + analysis, testing types, a design pattern, multi-process vs multi-thread, job reflections, and a Dockerfile explanation.
+
+1) Algorithm (Python) — list characters appearing at least twice
+
+# Contract
+# - Input: iterable of characters (e.g., ['c','a','i','o','p','a'])
+# - Output: list of characters that occur >= 2 times; order is by first appearance
+# - Error modes: if input is None, treat as empty; non-hashable items are ignored
+
+def find_duplicates(chars):
+    if not chars:
+        return []
+    seen = {}
+    order = []
+    for ch in chars:
+        try:
+            seen[ch] = seen.get(ch, 0) + 1
+            if seen[ch] == 1:
+                order.append(ch)
+        except TypeError:
+            # skip unhashable items
+            continue
+    return [ch for ch in order if seen.get(ch, 0) >= 2]
+
+# Example
+if __name__ == "__main__":
+    sample = ['c','a','i','o','p','a']
+    print(find_duplicates(sample))  # ['a']
+
+# Complexity
+# - Time: O(n) to count and filter, where n is len(chars).
+# - Space: O(k) for the frequency map + order, where k is the number of distinct hashable items.
+
+
+
+2) Do you know what a unit test is? And an integration test? What is the difference?
+   What about a system test?
+
+ The difference between both is that Unit test Checks a small piece of code (function/class) in isolation, with dependencies stubbed or mocked. Fast, deterministic.
+While an Integration test verifies that multiple components work together (e.g., service + DB). Uses real interfaces or thin fakes, fewer mocks.
+
+System test checks  the entire application end-to-end in a production-like environment and it also validates real-world flows and non-functionals.
+
+
+
+3) Do you know design patterns? Describe one briefly.
+
+One of the simplest and most widely used design patterns is the Singleton pattern. It ensures that a class has only one 
+instance in the application and provides a global point of access to it. This is useful for shared resources like loggers, 
+configuration managers, caches, or database connection pools. For example, instead of creating multiple loggers that could cause inconsistency, 
+a Singleton guarantees that the entire application uses the same logger instance.
+
+Here’s a real-world style Singleton example with a logger in Python
+
+This is a simple Logger implemented as a Singleton. No matter how many times I initialize it, all logs go into the same shared instance. 
+This avoids duplicate or inconsistent logging across the app
+
+class Logger:
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if not cls._instance:
+            cls._instance = super().__new__(cls)
+            cls._instance.logs = []
+        return cls._instance
+
+    def log(self, message):
+        self.logs.append(message)
+        print(f"LOG: {message}")
+
+# Example usage
+logger1 = Logger()
+logger2 = Logger()
+
+logger1.log("App started")
+logger2.log("User logged in")
+
+print(logger1 is logger2)   # True → same instance
+print(logger1.logs)         # ['App started', 'User logged in']
+
+
+
+4) Describe the pros and cons of writing a multi-process vs a multi-thread application
+Multi-process
+Pros: Actual parallelism on multi-core; good isolation (crash/leak isolated); does not suffer from GIL limits in CPython; can restart/workers independently.
+Cons: More memory overhead; IPC slower/more complicated; coordination and lifecycle management more complicated.
+Multi-thread
+Pros: Lightweight; shared memory is inexpensive to communicate; good for I/O-bound work; less complicated deployment model.
+Cons: Concurrency bugs (deadlocks, races); needs proper synchronization; under CPython CPU-bound work is GIL-bound; more challenging to reason about ordering.
+
+
+
+5) What&#39;s the most boring thing about your job? And what&#39;s the most satisfying?
+
+
+
+6) Explain and comment this Dockerfile.
+
+Dockerfile:
+FROM bitnami/minideb:latest
+RUN bash -c "echo "$ ( < /dev/urandom tr -cd "[:print:]" | head -c 32; echo )" > /tmp/auth"
+RUN <<EOF cat > /remove
+
+#!/usr/bin/env bash
+test -f /tmp/auth && rm -f /tmp/auth
+EOF
+RUN chmod +x /remove;
+bash /remove
+CMD ["/usr/bin/echo", "done"]
+
+Line-by-line:
+  Uses Bitnami's minimal Debian base. Small footprint, sane defaults.
+
+  Creates /tmp/auth with 32 random printable chars. The command is fragile due to nested quotes and subshell. Also, /tmp content won’t persist between layers the way you might expect at runtime, but across RUN layers it does exist during build.
+
+  Uses a heredoc to write a small script at /remove that deletes /tmp/auth if present.
+
+  Makes the script executable, then attempts to run it. The second command (bash /remove) is outside the RUN, so it executes at build-time host shell (Dockerfile parsing quirk) and will fail. It should be part of the same RUN line, e.g.,
+  RUN chmod +x /remove && /remove
+
+  When the container starts, it prints "done" and exits.
+
+Security and best practices:
+
+A cleaner version:
+FROM bitnami/minideb:20240715T000000Z
+
+# Use bash with strict error handling
+SHELL ["/bin/bash", "-euxo", "pipefail", "-c"]
+
+# Create and delete temp file in same layer
+RUN tmpfile=$(mktemp) && \
+    head -c 32 /dev/urandom | tr -cd '[:print:]' > "$tmpfile" && \
+    rm -f "$tmpfile"
+
+CMD ["/usr/bin/echo", "done"]
+
+
+Notes:
+This Dockerfile generates a temporary secret and later deletes it, but because each RUN creates 
+a new layer, the secret still exists in earlier layers. It also uses latest, which makes builds non-deterministic. The safer approach is to handle creation and deletion of temporary files in a single RUN step so nothing leaks to later layers, enforce stricter shell flags for reliability,
+ and pin the base image to a fixed version for reproducibility
